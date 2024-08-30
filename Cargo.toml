@@ -1,0 +1,42 @@
+[package]
+name = "cupiddb"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.38.0", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+    "net",
+    "io-util",
+    "time"
+]}
+tokio-util = "0.7.11"
+tracing = { version = "0.1.40", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
+dashmap = { version = "6.0.1", default-features = false }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = { version = "1.0.118" }
+chrono = { version = "0.4", features = ["serde"] }
+polars = { version = "0.41.3", default-features = false, features = [
+    "ipc",
+    "ipc_streaming",
+    "lazy",
+    "dtype-time",
+    "dtype-date",
+    "dtype-datetime",
+    "dtype-duration"
+]}
+polars-io = { version = "0.41.3", default-features = false }
+polars-core = { version = "0.41.3", default-features = false }
+polars-lazy = { version = "0.41.3", default-features = false }
+mimalloc = "0.1.43"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "fat"
