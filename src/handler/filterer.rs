@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::collections::HashSet;
+
 use arrow::array::{Array, BooleanArray, Int64Array, Float64Array,
     Date32Array, TimestampNanosecondArray};
 use arrow::compute::filter;
@@ -21,9 +23,16 @@ pub fn process_filter(
     columns_filters: &Vec<ColumnFilter>
 ) -> RecordBatch {
     let filtering_mask: BooleanArray;
+    let schema = record_batch.schema();
+
     if columns_filters.len() > 0 {
+        let data_type_options = vec!["IN", "FL", "DA", "DT"];
         filtering_mask = columns_filters
             .iter()
+            .filter(|item| {
+                data_type_options.contains(&item.data_type.as_str()) &&
+                    schema.field_with_name(&item.col).is_ok()
+            })
             .map(|item| {
                 let value_array = record_batch.column_by_name(&item.col)
                     .expect("Can not access to a col of the record bacth.");
@@ -32,7 +41,13 @@ pub fn process_filter(
                     "FL" => filter_float(&value_array, &item.value, &item.filter_type),
                     "DA" => filter_date(&value_array, &item.value, &item.filter_type),
                     "DT" => filter_datetime(&value_array, &item.value, &item.filter_type),
-                    _ => todo!(),
+                    _ => {
+                        if filterlogic == "AND" {
+                            BooleanArray::from(vec![true; record_batch.num_rows()])
+                        } else {
+                            BooleanArray::from(vec![false; record_batch.num_rows()])
+                        }
+                    }
                 };
                 return bool_arr;
             })
@@ -49,15 +64,15 @@ pub fn process_filter(
 
     let new_record_batch: RecordBatch;
     let new_schema: Schema;
-    let schema = record_batch.schema();
-    if cols.len() > 1 {
+    if cols.len() > 0 {
+        let cols_set: HashSet<String> = cols.clone().into_iter().collect();
         let filtered_columns = record_batch
             .columns()
             .par_iter()
             .zip(schema.fields().par_iter())
             .into_par_iter()
             .filter(|(_, field)| {
-                cols.contains(field.name())
+                cols_set.contains(field.name())
             })
             .map(|(column, _)| {
                 filter(column.as_ref(), &filtering_mask).unwrap()
@@ -68,7 +83,7 @@ pub fn process_filter(
             .fields()
             .par_iter()
             .filter(|field| {
-                cols.contains(field.name())
+                cols_set.contains(field.name())
             })
             .map(|field| {
                 schema.field_with_name(field.name()).expect("Can not access to a col of the schema").clone()
