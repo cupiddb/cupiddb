@@ -1,6 +1,6 @@
 [package]
 name = "cupiddb"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -18,19 +18,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 dashmap = { version = "6.0.1", default-features = false }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = { version = "1.0.118" }
-chrono = { version = "0.4", features = ["serde"] }
-polars = { version = "0.41.3", default-features = false, features = [
-    "ipc",
-    "ipc_streaming",
-    "lazy",
-    "dtype-time",
-    "dtype-date",
-    "dtype-datetime",
-    "dtype-duration"
+arrow = { version = "53.0.0", default-features = false, features = [
+    "ipc"
 ]}
-polars-io = { version = "0.41.3", default-features = false }
-polars-core = { version = "0.41.3", default-features = false }
-polars-lazy = { version = "0.41.3", default-features = false }
+rayon = { version = "1.10.0", default-features = false }
 mimalloc = "0.1.43"
 
 [profile.dev]

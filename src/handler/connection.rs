@@ -21,7 +21,7 @@ impl Connection {
 
         match self.stream.read_exact(&mut header_buffer).await {
             Ok(_) => {
-                assert!(header_buffer[0] as char == 'A');
+                assert!(header_buffer[0] as char == 'A', "Protocol error");
 
                 payload_buffer.clone_from_slice(&header_buffer[3..11]);
                 packet_length = u64::from_be_bytes(payload_buffer);
