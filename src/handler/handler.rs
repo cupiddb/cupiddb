@@ -1,16 +1,13 @@
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
+
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
-
-use polars::frame::DataFrame;
-use polars_io::{SerReader, SerWriter};
-use polars_io::ipc::{IpcStreamReader, IpcStreamWriter};
-
+use arrow::ipc::reader::StreamReader;
+use arrow::ipc::writer::StreamWriter;
 use dashmap::DashMap;
 use serde::Deserialize;
-use serde_json::to_string;
 
 use crate::handler::connection::Connection;
 use crate::handler::filterer::process_filter;
@@ -31,6 +28,7 @@ struct Query {
 pub struct ColumnFilter {
     pub col: String,
     pub filter_type: String,
+    pub data_type: String,
     pub value: f64,
 }
 
@@ -172,51 +170,26 @@ async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_d
             let error_code: u16 = 4;
             return ("ER".to_string(), error_code.to_be_bytes().to_vec());
         }
-        let mut reader = IpcStreamReader::new(&record_batch_bytes[1..]);
-        let schema = match reader.arrow_schema(){
-            Ok(schema) => schema,
-            Err(_e) => {
+
+        let mut reader = StreamReader::try_new(&record_batch_bytes[1..], None).expect("Read error");
+        let record_batch = match reader.next() {
+            Some(Ok(rb)) => rb,
+            Some(Err(_)) => {
+                let error_code: u16 = 4;
+                return ("ER".to_string(), error_code.to_be_bytes().to_vec());
+            },
+            None => {
                 let error_code: u16 = 4;
                 return ("ER".to_string(), error_code.to_be_bytes().to_vec());
             }
         };
 
-        let dataframe: DataFrame = match reader.finish() {
-            Ok(reader) => reader,
-            Err(_e) => {
-                let error_code: u16 = 4;
-                return ("ER".to_string(), error_code.to_be_bytes().to_vec());
-            }
-        };
+        let filtered_record_batch = process_filter(&record_batch, &query.columns, &query.filterlogic, &query.filter);
 
-        let mut filtered_dataframe = process_filter(&dataframe, &query.filterlogic, &query.filter);
-        if query.columns.len()>0{
-            filtered_dataframe = match filtered_dataframe.select(query.columns){
-                Ok(reader) => reader,
-                Err(_e) => {
-                    let error_code: u16 = 4;
-                    return ("ER".to_string(), error_code.to_be_bytes().to_vec());
-                }
-            };
-        }
-
-        let mut buffer: Vec<u8> = vec![];
-
-        let metadata = schema.metadata;
-        let metadata_buffer: Vec<u8> = match to_string(&metadata){
-            Ok(a) => a.as_bytes().to_vec(),
-            Err(_e) => {
-                let error_code: u16 = 4;
-                return ("ER".to_string(), error_code.to_be_bytes().to_vec());
-            }
-        };
-
-        let metadata_size: u32 = metadata_buffer.len().try_into().unwrap();
-        buffer.extend(metadata_size.to_be_bytes());
-        buffer.extend(metadata_buffer);
-
-        let mut writer = IpcStreamWriter::new(&mut buffer);
-        let _ = writer.finish(&mut filtered_dataframe);
+        let mut writer = StreamWriter::try_new(Vec::new(), &filtered_record_batch.schema()).expect("Schema error");
+        let _ = writer.write(&filtered_record_batch);
+        let _ = writer.finish();
+        let buffer: Vec<u8> = writer.into_inner().expect("Buffer error");
 
         if query.cachetime > 0 {
             shared_db.insert(payload_query_string.clone(), buffer.clone());
