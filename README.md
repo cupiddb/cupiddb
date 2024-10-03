@@ -1,10 +1,15 @@
 # CupidDB
+CupidDB is a high-performance in-memory database designed for efficient storage and retrieval of byte-level data. Built to handle columnar data in the Apache Arrow format, it enables rapid data manipulation and minimizes network overhead, making it ideal for caching DataFrames.
+
+## Client Library
+* [`pycupiddb`]: Python client for CupidDB
+
+[`pycupiddb`]: https://github.com/cupiddb/pycupiddb
+
 
 ## Production Build
 ```
 cargo build --release
-
-cargo run --release
 ```
 
 ## Production Docker Build

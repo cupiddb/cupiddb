@@ -1,10 +1,10 @@
 [package]
 name = "cupiddb"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.38.0", default-features = false, features = [
+tokio = { version = "=1.40.0", default-features = false, features = [
     "rt-multi-thread",
     "macros",
     "signal",
@@ -12,17 +12,18 @@ tokio = { version = "1.38.0", default-features = false, features = [
     "io-util",
     "time"
 ]}
-tokio-util = "0.7.11"
-tracing = { version = "0.1.40", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt"] }
-dashmap = { version = "6.0.1", default-features = false }
-serde = { version = "1.0.203", features = ["derive"] }
-serde_json = { version = "1.0.118" }
-arrow = { version = "53.0.0", default-features = false, features = [
-    "ipc"
+tokio-util = "=0.7.12"
+tracing = { version = "=0.1.40", default-features = false }
+tracing-subscriber = { version = "=0.3.18", default-features = false, features = ["fmt"] }
+dashmap = { version = "=6.1.0", default-features = false }
+serde = { version = "=1.0.210", features = ["derive"] }
+serde_json = { version = "=1.0.128" }
+arrow = { version = "=53.0.0", default-features = false, features = [
+    "ipc",
+    "ipc_compression",
 ]}
-rayon = { version = "1.10.0", default-features = false }
-mimalloc = "0.1.43"
+rayon = { version = "=1.10.0", default-features = false }
+mimalloc = "=0.1.43"
 
 [profile.dev]
 opt-level = 0
