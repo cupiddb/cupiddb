@@ -39,13 +39,43 @@ pub fn process_filter(
 
                 let bool_arr = match data_array.data_type() {
                     DataType::Int64 => {
-                        let value = item.value_int.unwrap();
+                        let value = item.value_int.unwrap() as i64;
                         let filter_arr = array::Int64Array::from(vec![value; data_len]);
                         filter_array(&data_array, &filter_arr, &item.filter_type)
                     },
                     DataType::Int32 => {
                         let value = item.value_int.unwrap() as i32;
                         let filter_arr = array::Int32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Int16 => {
+                        let value = item.value_int.unwrap() as i16;
+                        let filter_arr = array::Int16Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Int8 => {
+                        let value = item.value_int.unwrap() as i8;
+                        let filter_arr = array::Int8Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt64 => {
+                        let value = item.value_int.unwrap() as u64;
+                        let filter_arr = array::UInt64Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt32 => {
+                        let value = item.value_int.unwrap() as u32;
+                        let filter_arr = array::UInt32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt16 => {
+                        let value = item.value_int.unwrap() as u16;
+                        let filter_arr = array::UInt16Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt8 => {
+                        let value = item.value_int.unwrap() as u8;
+                        let filter_arr = array::UInt8Array::from(vec![value; data_len]);
                         filter_array(&data_array, &filter_arr, &item.filter_type)
                     },
                     DataType::Float64 => {
@@ -74,7 +104,7 @@ pub fn process_filter(
                         filter_array(&data_array, &filter_arr, &item.filter_type)
                     },
                     DataType::Timestamp(TimeUnit::Nanosecond, ..) => {
-                        let value = item.value_int.unwrap();
+                        let value = item.value_int.unwrap() as i64;
                         let filter_arr = array::TimestampNanosecondArray::from(vec![value; data_len]);
                         filter_array(&data_array, &filter_arr, &item.filter_type)
                     },
