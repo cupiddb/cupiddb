@@ -33,7 +33,10 @@ pub struct ColumnFilter {
     pub col: String,
     pub filter_type: String,
     pub data_type: String,
-    pub value: f64,
+    pub value_int: Option<i64>,
+    pub value_flt: Option<f64>,
+    pub value_bol: Option<bool>,
+    pub value_str: Option<String>,
 }
 
 pub async fn handle_stream(socket: TcpStream, token: CancellationToken, timeout_db: TimeoutDB, shared_db: SharedDB) {
