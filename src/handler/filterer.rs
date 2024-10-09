@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use std::collections::HashSet;
 
-use arrow::array::{Array, BooleanArray, Int64Array, Float64Array,
-    Date32Array, TimestampNanosecondArray};
+use arrow::array::{self, Array, BooleanArray};
 use arrow::compute::filter;
 use arrow::compute::kernels::cmp::{gt, eq, lt, gt_eq, lt_eq, neq};
-use arrow::datatypes::{Field, Schema};
+use arrow::datatypes::{Field, Schema, DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use rayon::iter::{
     IntoParallelRefIterator,
@@ -26,7 +25,7 @@ pub fn process_filter(
     let schema = record_batch.schema();
 
     if columns_filters.len() > 0 {
-        let data_type_options = vec!["IN", "FL", "DA", "DT"];
+        let data_type_options = vec!["IN", "FL", "DA", "DT", "ST", "BL"];
         filtering_mask = columns_filters
             .iter()
             .filter(|item| {
@@ -34,20 +33,82 @@ pub fn process_filter(
                     schema.field_with_name(&item.col).is_ok()
             })
             .map(|item| {
-                let value_array = record_batch.column_by_name(&item.col)
+                let data_array = record_batch.column_by_name(&item.col)
                     .expect("Can not access to a col of the record bacth.");
-                let bool_arr = match item.data_type.as_str() {
-                    "IN" => filter_int(&value_array, &item.value, &item.filter_type),
-                    "FL" => filter_float(&value_array, &item.value, &item.filter_type),
-                    "DA" => filter_date(&value_array, &item.value, &item.filter_type),
-                    "DT" => filter_datetime(&value_array, &item.value, &item.filter_type),
-                    _ => {
-                        if filterlogic == "AND" {
-                            BooleanArray::from(vec![true; record_batch.num_rows()])
-                        } else {
-                            BooleanArray::from(vec![false; record_batch.num_rows()])
-                        }
+                let data_len = data_array.len();
+
+                let bool_arr = match data_array.data_type() {
+                    DataType::Int64 => {
+                        let value = item.value_int.unwrap() as i64;
+                        let filter_arr = array::Int64Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Int32 => {
+                        let value = item.value_int.unwrap() as i32;
+                        let filter_arr = array::Int32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Int16 => {
+                        let value = item.value_int.unwrap() as i16;
+                        let filter_arr = array::Int16Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Int8 => {
+                        let value = item.value_int.unwrap() as i8;
+                        let filter_arr = array::Int8Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt64 => {
+                        let value = item.value_int.unwrap() as u64;
+                        let filter_arr = array::UInt64Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt32 => {
+                        let value = item.value_int.unwrap() as u32;
+                        let filter_arr = array::UInt32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt16 => {
+                        let value = item.value_int.unwrap() as u16;
+                        let filter_arr = array::UInt16Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::UInt8 => {
+                        let value = item.value_int.unwrap() as u8;
+                        let filter_arr = array::UInt8Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Float64 => {
+                        let value = item.value_flt.unwrap();
+                        let filter_arr = array::Float64Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Float32 => {
+                        let value = item.value_flt.unwrap() as f32;
+                        let filter_arr = array::Float32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Boolean => {
+                        let value = item.value_bol.unwrap();
+                        let filter_arr = array::BooleanArray::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
                     }
+                    DataType::Utf8 => {
+                        let value = item.value_str.clone().unwrap();
+                        let filter_arr = array::StringArray::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Date32 => {
+                        let value = item.value_int.unwrap() as i32;
+                        let filter_arr = array::Date32Array::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    DataType::Timestamp(TimeUnit::Nanosecond, ..) => {
+                        let value = item.value_int.unwrap() as i64;
+                        let filter_arr = array::TimestampNanosecondArray::from(vec![value; data_len]);
+                        filter_array(&data_array, &filter_arr, &item.filter_type)
+                    },
+                    _ => { panic!("Not implemented for data type") }
                 };
                 return bool_arr;
             })
@@ -106,78 +167,20 @@ pub fn process_filter(
     return new_record_batch;
 }
 
-fn filter_int(value_array: &Arc<dyn Array>, value: &f64, filter_type: &String) -> BooleanArray {
-    let filter_arr = Int64Array::from(vec![*value as i64; value_array.len()]);
+fn filter_array(data_array: &Arc<dyn Array>, filter_value: &dyn Array, filter_type: &String) -> BooleanArray {
     let mask: BooleanArray;
     if filter_type == "gt" {
-        mask = gt(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = gt(data_array, &filter_value).unwrap();
     } else if filter_type == "eq" {
-        mask = eq(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = eq(data_array, &filter_value).unwrap();
     } else if filter_type == "lt" {
-        mask = lt(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = lt(data_array, &filter_value).unwrap();
     } else if filter_type == "gte" {
-        mask = gt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = gt_eq(data_array, &filter_value).unwrap();
     } else if filter_type == "lte" {
-        mask = lt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = lt_eq(data_array, &filter_value).unwrap();
     } else {
-        mask = neq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    }
-    return mask;
-}
-
-fn filter_float(value_array: &Arc<dyn Array>, value: &f64, filter_type: &String) -> BooleanArray {
-    let filter_arr = Float64Array::from(vec![*value; value_array.len()]);
-    let mask: BooleanArray;
-    if filter_type == "gt" {
-        mask = gt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "eq" {
-        mask = eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lt" {
-        mask = lt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "gte" {
-        mask = gt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lte" {
-        mask = lt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else {
-        mask = neq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    }
-    return mask;
-}
-
-fn filter_date(value_array: &Arc<dyn Array>, value: &f64, filter_type: &String) -> BooleanArray {
-    let filter_arr = Date32Array::from(vec![*value as i32; value_array.len()]);
-    let mask: BooleanArray;
-    if filter_type == "gt" {
-        mask = gt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "eq" {
-        mask = eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lt" {
-        mask = lt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "gte" {
-        mask = gt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lte" {
-        mask = lt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else {
-        mask = neq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    }
-    return mask;
-}
-
-fn filter_datetime(value_array: &Arc<dyn Array>, value: &f64, filter_type: &String) -> BooleanArray {
-    let filter_arr = TimestampNanosecondArray::from(vec![*value as i64; value_array.len()]);
-    let mask: BooleanArray;
-    if filter_type == "gt" {
-        mask = gt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "eq" {
-        mask = eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lt" {
-        mask = lt(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "gte" {
-        mask = gt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else if filter_type == "lte" {
-        mask = lt_eq(value_array, &filter_arr).expect("Can not compare the arrays.");
-    } else {
-        mask = neq(value_array, &filter_arr).expect("Can not compare the arrays.");
+        mask = neq(data_array, &filter_value).unwrap();
     }
     return mask;
 }
