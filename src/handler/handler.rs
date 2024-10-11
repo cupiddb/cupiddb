@@ -4,8 +4,11 @@ use std::time::{SystemTime, Duration};
 use tokio::net::TcpStream;
 use tokio::select;
 use tokio_util::sync::CancellationToken;
+use arrow::record_batch::RecordBatch;
 use arrow::ipc::reader::StreamReader;
-use arrow::ipc::writer::StreamWriter;
+use arrow::ipc::writer::{StreamWriter, IpcWriteOptions};
+use arrow::ipc::CompressionType;
+use arrow::ipc::gen::Schema::MetadataVersion;
 use dashmap::DashMap;
 use serde::Deserialize;
 
@@ -22,6 +25,7 @@ struct Query {
     filterlogic: String,
     filter: Vec<ColumnFilter>,
     cachetime: u64,
+    compression_type: String,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +169,7 @@ async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_d
         }
     };
 
+    let record_batch: Option<RecordBatch>;
     if let Some(record_batch_bytes) = shared_db.get(&query.key) {
         if record_batch_bytes[0] as char != 'A' {
             let error_code: u16 = 4;
@@ -172,8 +177,10 @@ async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_d
         }
 
         let mut reader = StreamReader::try_new(&record_batch_bytes[1..], None).expect("Read error");
-        let record_batch = match reader.next() {
-            Some(Ok(rb)) => rb,
+        match reader.next() {
+            Some(Ok(rb)) => {
+                record_batch = Some(rb);
+            },
             Some(Err(_)) => {
                 let error_code: u16 = 4;
                 return ("ER".to_string(), error_code.to_be_bytes().to_vec());
@@ -182,27 +189,40 @@ async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_d
                 let error_code: u16 = 4;
                 return ("ER".to_string(), error_code.to_be_bytes().to_vec());
             }
-        };
-
-        let filtered_record_batch = process_filter(&record_batch, &query.columns, &query.filterlogic, &query.filter);
-
-        let mut writer = StreamWriter::try_new(Vec::new(), &filtered_record_batch.schema()).expect("Schema error");
-        let _ = writer.write(&filtered_record_batch);
-        let _ = writer.finish();
-        let buffer: Vec<u8> = writer.into_inner().expect("Buffer error");
-
-        if query.cachetime > 0 {
-            shared_db.insert(payload_query_string.clone(), buffer.clone());
-            let now = SystemTime::now();
-            let duration = Duration::from_millis(query.cachetime);
-            timeout_db.insert(payload_query_string, now + duration);
         }
-
-        return ("AR".to_string(), buffer);
     } else {
         let error_code: u16 = 2;
         return ("ER".to_string(), error_code.to_be_bytes().to_vec());
     }
+
+    let filtered_record_batch = process_filter(&record_batch.unwrap(), &query.columns, &query.filterlogic, &query.filter);
+
+    let alignment = 64;
+    let write_legacy_ipc_format = false;
+    let mut write_options: IpcWriteOptions = IpcWriteOptions::try_new(
+        alignment, write_legacy_ipc_format, MetadataVersion::V5
+    ).unwrap();
+    if query.compression_type == "lz4" {
+        write_options = write_options.try_with_compression(Some(CompressionType::LZ4_FRAME)).unwrap();
+    } else if query.compression_type == "zstd" {
+        write_options = write_options.try_with_compression(Some(CompressionType::ZSTD)).unwrap();
+    }
+
+    let mut writer = StreamWriter::try_new_with_options(
+        Vec::new(), &filtered_record_batch.schema(), write_options
+    ).expect("Schema error");
+
+    let _ = writer.write(&filtered_record_batch);
+    let _ = writer.finish();
+    let buffer: Vec<u8> = writer.into_inner().expect("Buffer error");
+
+    if query.cachetime > 0 {
+        shared_db.insert(payload_query_string.clone(), buffer.clone());
+        let now = SystemTime::now();
+        let duration = Duration::from_millis(query.cachetime);
+        timeout_db.insert(payload_query_string, now + duration);
+    }
+    return ("AR".to_string(), buffer);
 }
 
 async fn handle_get_data(payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
