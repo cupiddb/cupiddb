@@ -33,7 +33,7 @@ jobs:
 
       - name: Build and push
         env:
-          REGISTRY: wiamsuri
+          REGISTRY: cupiddb
           REPOSITORY: cupiddb
         run: |
           echo ${{ steps.buildx.outputs.platforms }}
@@ -42,4 +42,5 @@ jobs:
             --push \
             --target runner \
             --platform ${{ steps.buildx.outputs.platforms }} \
+            -t $REGISTRY/$REPOSITORY:latest \
             -t $REGISTRY/$REPOSITORY:${GITHUB_REF##*/} .
