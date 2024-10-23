@@ -42,4 +42,5 @@ jobs:
             --push \
             --target runner \
             --platform ${{ steps.buildx.outputs.platforms }} \
+            -t $REGISTRY/$REPOSITORY:latest \
             -t $REGISTRY/$REPOSITORY:${GITHUB_REF##*/} .
