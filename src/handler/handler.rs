@@ -64,10 +64,12 @@ pub async fn handle_stream(socket: TcpStream, token: CancellationToken, timeout_
             "TL" => handle_ttl(cloned_timeout_db, payload, cloned_db).await,
             "LS" => handle_list_keys(cloned_db).await,
             "DM" => handle_delete_many(cloned_timeout_db, payload, cloned_db).await,
+            "WP" => handle_wrong_protocol().await,
             "CC" => handle_connection_close().await,
             _ => handle_unknown_type().await,
         };
-        if response_type == "CC" {
+        if response_type == "CC" || message_type == "WP" {
+            connection.write_frame(response_type, response_payload).await;
             break;
         }
 
@@ -339,6 +341,11 @@ async fn handle_delete_many(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: 
         }
     }
     return ("DM".to_string(), count.to_be_bytes().to_vec());
+}
+
+async fn handle_wrong_protocol() -> (String, Vec<u8>) {
+    let error_code: u16 = 6;
+    return ("ER".to_string(), error_code.to_be_bytes().to_vec());
 }
 
 async fn handle_connection_close() -> (String, Vec<u8>) {
