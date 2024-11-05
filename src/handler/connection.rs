@@ -1,7 +1,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-const PROTOCOL_VERSION: char = 'A';
+const PROTOCOL_VERSION: char = 'B';
 
 pub struct Connection {
     stream: TcpStream,
@@ -53,7 +53,7 @@ impl Connection {
     }
 
     pub async fn write_frame(&mut self, message_type: String, payload: Vec<u8>) {
-        let header = "A".to_string() + message_type.as_str();
+        let header = PROTOCOL_VERSION.to_string() + message_type.as_str();
         let payload_length = payload.len() as u64;
 
         let mut header_buffer = header.into_bytes();
