@@ -1,10 +1,10 @@
 [package]
 name = "cupiddb"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "=1.40.0", default-features = false, features = [
+tokio = { version = "=1.41.0", default-features = false, features = [
     "rt-multi-thread",
     "macros",
     "signal",
@@ -18,7 +18,7 @@ tracing-subscriber = { version = "=0.3.18", default-features = false, features =
 dashmap = { version = "=6.1.0", default-features = false }
 serde = { version = "=1.0.210", features = ["derive"] }
 serde_json = { version = "=1.0.128" }
-arrow = { version = "=53.1.0", default-features = false, features = [
+arrow = { version = "=53.2.0", default-features = false, features = [
     "ipc",
     "ipc_compression",
 ]}
