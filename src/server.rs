@@ -1,14 +1,19 @@
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use dashmap::DashMap;
-use tokio::net::TcpListener;
+use tokio::net::{TcpStream, TcpListener};
 use tokio::time::{sleep, Duration};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::AppConfig;
-use crate::handler::handler::handle_stream;
+use crate::handler::handler::handle_frame;
 use crate::handler::cache_manager::cache_manager;
+use crate::handler::connection::Connection;
+
+type TimeoutDB = Arc<DashMap<String, SystemTime>>;
+type SharedDB = Arc<DashMap<String, Vec<u8>>>;
 
 pub struct Server {
     listener: TcpListener,
@@ -90,4 +95,30 @@ impl Server {
         }
         tracing::info!("Exiting");
     }
+}
+
+async fn handle_stream(socket: TcpStream, token: CancellationToken, timeout_db: TimeoutDB, shared_db: SharedDB) {
+    tracing::debug!("Client accepted");
+    let mut connection = Connection::new(socket);
+
+    loop {
+        let (message_type, payload) = select! {
+            res = connection.read_frame() => res,
+            _ = token.cancelled() => {
+                ("CC".to_string(), vec![0; 0])
+            }
+        };
+        let cloned_timeout_db = Arc::clone(&timeout_db);
+        let cloned_db = Arc::clone(&shared_db);
+
+        let (response_type, response_payload) = handle_frame(&message_type, &payload, cloned_timeout_db, cloned_db);
+
+        if response_type == "CC" || message_type == "WP" {
+            connection.write_frame(response_type, response_payload).await;
+            break;
+        }
+
+        connection.write_frame(response_type, response_payload).await;
+    }
+    tracing::debug!("End connection");
 }
