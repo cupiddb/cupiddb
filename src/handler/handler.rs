@@ -258,9 +258,13 @@ fn handle_touch(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -
     };
 
     if shared_db.contains_key(&key) {
-        let now = SystemTime::now();
-        let duration = Duration::from_millis(cache_time_ms);
-        timeout_db.insert(key, now + duration);
+        if cache_time_ms > 0 {
+            let now = SystemTime::now();
+            let duration = Duration::from_millis(cache_time_ms);
+            timeout_db.insert(key, now + duration);
+        } else {
+            let _ = timeout_db.remove(&key);
+        }
         return ("OK".to_string(), vec![0; 0]);
     } else {
         let error_code: u16 = 2;
