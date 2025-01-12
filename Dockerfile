@@ -1,4 +1,4 @@
-FROM rust:1.81-bookworm AS base
+FROM rust:1.82-bookworm AS base
 
 WORKDIR /app
 COPY . .

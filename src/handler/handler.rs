@@ -8,6 +8,7 @@ use arrow::ipc::CompressionType;
 use arrow::ipc::gen::Schema::MetadataVersion;
 use dashmap::DashMap;
 use serde::Deserialize;
+use glob_match::glob_match;
 
 use crate::handler::filterer::process_filter;
 
@@ -47,7 +48,7 @@ pub fn handle_frame(message_type: &String, payload: &Vec<u8>,
         "TH" => handle_touch(timeout_db, payload, shared_db),
         "TL" => handle_ttl(timeout_db, payload, shared_db),
         "HK" => handle_has_key(payload, shared_db),
-        "LS" => handle_list_keys(shared_db),
+        "LS" => handle_list_keys(payload, shared_db),
         "DM" => handle_delete_many(timeout_db, payload, shared_db),
         "FU" => handle_flush(timeout_db, shared_db),
         "WP" => handle_wrong_protocol(),
@@ -308,16 +309,22 @@ fn handle_has_key(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     }
 }
 
-fn handle_list_keys(shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_list_keys(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let mut keys_payload_bytes: Vec<u8> = Vec::new();
+    let pattern = std::str::from_utf8(payload).unwrap();
 
     for entry in shared_db.iter() {
         let key_bytes = entry.key().as_bytes();
         let _query: Query = match serde_json::from_slice(key_bytes) {
             Ok(_q) => _q,
             Err(_e) => {
-                keys_payload_bytes.extend(key_bytes);
-                keys_payload_bytes.push(0);
+                if payload.len() == 0 {
+                    keys_payload_bytes.extend(key_bytes);
+                    keys_payload_bytes.push(0);
+                } else if glob_match(pattern, std::str::from_utf8(key_bytes).unwrap()) {
+                    keys_payload_bytes.extend(key_bytes);
+                    keys_payload_bytes.push(0);
+                }
                 continue;
             }
         };
