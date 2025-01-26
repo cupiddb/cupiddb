@@ -32,11 +32,11 @@ impl Server {
     pub async fn run(self) {
         let shutdown_token = CancellationToken::new();
         let timeout_db = Arc::new(DashMap::with_capacity_and_shard_amount(
-            self.config.cache_initial_capacity, 
+            self.config.cache_initial_capacity,
             self.config.cache_shards
         ));
         let shared_db = Arc::new(DashMap::with_capacity_and_shard_amount(
-            self.config.cache_initial_capacity, 
+            self.config.cache_initial_capacity,
             self.config.cache_shards
         ));
 
@@ -66,7 +66,7 @@ impl Server {
         };
 
         let connection_counter = Arc::new(Mutex::new(0_usize));
-        
+
         // Main accept loop
         loop {
             let accept_result = select! {
@@ -108,7 +108,7 @@ impl Server {
 
         // Graceful shutdown
         self.graceful_shutdown(connection_counter, self.config.graceful_timeout).await;
-        
+
         // Wait for background tasks
         let _ = tokio::join!(cache_manager_handle, shutdown_handle);
         tracing::info!("Server shutdown complete");
@@ -116,18 +116,18 @@ impl Server {
 
     async fn graceful_shutdown(&self, connection_counter: Arc<Mutex<usize>>, timeout_seconds: usize) {
         tracing::info!("Gracefully shutting down with a {} second timeout", timeout_seconds);
-        
+
         for remaining in (0..timeout_seconds).rev() {
             let count = {
                 let counter = connection_counter.lock().unwrap();
                 *counter
             };
-            
+
             if count == 0 {
                 break;
             }
-            
-            tracing::info!("Waiting for {} connections to close, {} seconds remaining", 
+
+            tracing::info!("Waiting for {} connections to close, {} seconds remaining",
                 count, remaining);
             sleep(Duration::from_secs(1)).await;
         }

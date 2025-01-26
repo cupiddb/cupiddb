@@ -2,6 +2,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const PROTOCOL_VERSION: char = 'B';
+const HEADER_SIZE: usize = 11;
 
 pub struct Connection {
     stream: TcpStream,
@@ -15,14 +16,14 @@ impl Connection {
     }
 
     pub async fn read_frame(&mut self) -> (String, Vec<u8>) {
-        let mut header_buffer = [0; 11];
+        let mut header_buffer = [0; HEADER_SIZE];
         let mut payload_length_buffer = [0; 8];
         let packet_length: u64;
         let message_type: String;
 
         match self.stream.read_exact(&mut header_buffer).await {
             Ok(_) => {
-                payload_length_buffer.clone_from_slice(&header_buffer[3..11]);
+                payload_length_buffer.clone_from_slice(&header_buffer[3..HEADER_SIZE]);
                 packet_length = u64::from_be_bytes(payload_length_buffer);
                 if header_buffer[0] as char == PROTOCOL_VERSION {
                     message_type = match String::from_utf8((&header_buffer[1..3]).to_vec()) {
