@@ -1,9 +1,6 @@
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
 
-use tokio::net::TcpStream;
-use tokio::select;
-use tokio_util::sync::CancellationToken;
 use arrow::record_batch::RecordBatch;
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::{StreamWriter, IpcWriteOptions};
@@ -11,8 +8,8 @@ use arrow::ipc::CompressionType;
 use arrow::ipc::gen::Schema::MetadataVersion;
 use dashmap::DashMap;
 use serde::Deserialize;
+use glob_match::glob_match;
 
-use crate::handler::connection::Connection;
 use crate::handler::filterer::process_filter;
 
 type TimeoutDB = Arc<DashMap<String, SystemTime>>;
@@ -39,53 +36,40 @@ pub struct ColumnFilter {
     pub value_str: Option<String>,
 }
 
-pub async fn handle_stream(socket: TcpStream, token: CancellationToken, timeout_db: TimeoutDB, shared_db: SharedDB) {
-    tracing::debug!("Client accepted");
-    let mut connection = Connection::new(socket);
-
-    loop {
-        let (message_type, payload) = select! {
-            res = connection.read_frame() => res,
-            _ = token.cancelled() => {
-                ("CC".to_string(), vec![0; 0])
-            }
-        };
-        let cloned_timeout_db = Arc::clone(&timeout_db);
-        let cloned_db = Arc::clone(&shared_db);
-
-        let (response_type, response_payload) = match message_type.as_str() {
-            "SD" => handle_set_data(cloned_timeout_db, payload, cloned_db).await,
-            "II" => handle_increment_integer(payload, cloned_db).await,
-            "IF" => handle_increment_float(payload, cloned_db).await,
-            "GA" => handle_get_arrow_data(cloned_timeout_db, payload, cloned_db).await,
-            "GD" => handle_get_data(payload, cloned_db).await,
-            "DL" => handle_delete(cloned_timeout_db, payload, cloned_db).await,
-            "TH" => handle_touch(cloned_timeout_db, payload, cloned_db).await,
-            "TL" => handle_ttl(cloned_timeout_db, payload, cloned_db).await,
-            "LS" => handle_list_keys(cloned_db).await,
-            "DM" => handle_delete_many(cloned_timeout_db, payload, cloned_db).await,
-            "WP" => handle_wrong_protocol().await,
-            "CC" => handle_connection_close().await,
-            _ => handle_unknown_type().await,
-        };
-        if response_type == "CC" || message_type == "WP" {
-            connection.write_frame(response_type, response_payload).await;
-            break;
-        }
-
-        connection.write_frame(response_type, response_payload).await;
+pub fn handle_frame(message_type: &String, payload: &Vec<u8>,
+                    timeout_db: TimeoutDB, shared_db: SharedDB) -> (String, Vec<u8>) {
+    match message_type.as_str() {
+        "SD" => handle_set_data(timeout_db, payload, shared_db),
+        "II" => handle_increment_integer(payload, shared_db),
+        "IF" => handle_increment_float(payload, shared_db),
+        "GA" => handle_get_arrow_data(timeout_db, payload, shared_db),
+        "GD" => handle_get_data(payload, shared_db),
+        "DL" => handle_delete(timeout_db, payload, shared_db),
+        "TH" => handle_touch(timeout_db, payload, shared_db),
+        "TL" => handle_ttl(timeout_db, payload, shared_db),
+        "HK" => handle_has_key(payload, shared_db),
+        "LS" => handle_list_keys(payload, shared_db),
+        "DM" => handle_delete_many(timeout_db, payload, shared_db),
+        "FU" => handle_flush(timeout_db, shared_db),
+        "WP" => handle_wrong_protocol(),
+        "CC" => handle_connection_close(),
+        _ => handle_unknown_type(),
     }
-    tracing::debug!("End connection");
 }
 
-async fn handle_set_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_set_data(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let cache_time_bytes: [u8; 8] = payload[0..8].try_into().expect("Incorrect length");
     let cache_time_ms = u64::from_be_bytes(cache_time_bytes);
-    let key_index_until = (u16::from_be_bytes([payload[8], payload[9]]) + 10) as usize;
-    let key = match std::str::from_utf8(&payload[10..key_index_until]) {
+    let is_add = payload[8] != 0;
+    let key_index_until = (u16::from_be_bytes([payload[9], payload[10]]) + 11) as usize;
+    let key = match std::str::from_utf8(&payload[11..key_index_until]) {
         Ok(valid_str) => { valid_str.to_string() },
         Err(_) => { panic!("Invalid") },
     };
+
+    if is_add && shared_db.contains_key(&key) {
+        return ("NA".to_string(), vec![0; 0]);
+    }
 
     shared_db.insert(key.clone(), payload[key_index_until..].to_vec());
     if cache_time_ms > 0 {
@@ -98,7 +82,7 @@ async fn handle_set_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: Sha
     return ("OK".to_string(), vec![0; 0]);
 }
 
-async fn handle_increment_integer(payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_increment_integer(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let key = match std::str::from_utf8(&payload[8..]) {
         Ok(valid_str) => { valid_str.to_string() },
         Err(_) => { panic!("Invalid") },
@@ -128,7 +112,7 @@ async fn handle_increment_integer(payload: Vec<u8>, shared_db: SharedDB) -> (Str
     }
 }
 
-async fn handle_increment_float(payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_increment_float(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let key = match std::str::from_utf8(&payload[8..]) {
         Ok(valid_str) => { valid_str.to_string() },
         Err(_) => { panic!("Invalid") },
@@ -158,7 +142,7 @@ async fn handle_increment_float(payload: Vec<u8>, shared_db: SharedDB) -> (Strin
     }
 }
 
-async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let payload_str = std::str::from_utf8(&payload).expect("Payload error");
     let payload_query_string = payload_str.to_string();
 
@@ -230,7 +214,7 @@ async fn handle_get_arrow_data(timeout_db: TimeoutDB, payload: Vec<u8>, shared_d
     return ("AR".to_string(), buffer);
 }
 
-async fn handle_get_data(payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_get_data(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let get_key = std::str::from_utf8(&payload).expect("Payload error");
 
     if let Some(bytes_data) = shared_db.get(get_key) {
@@ -253,7 +237,7 @@ async fn handle_get_data(payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<
     }
 }
 
-async fn handle_delete(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_delete(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let del_key = std::str::from_utf8(&payload).expect("Payload error");
 
     let _ = timeout_db.remove(del_key);
@@ -265,7 +249,7 @@ async fn handle_delete(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: Share
     }
 }
 
-async fn handle_touch(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_touch(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let cache_time_bytes: [u8; 8] = payload[0..8].try_into().expect("Incorrect length");
     let cache_time_ms = u64::from_be_bytes(cache_time_bytes);
 
@@ -275,9 +259,13 @@ async fn handle_touch(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: Shared
     };
 
     if shared_db.contains_key(&key) {
-        let now = SystemTime::now();
-        let duration = Duration::from_millis(cache_time_ms);
-        timeout_db.insert(key, now + duration);
+        if cache_time_ms > 0 {
+            let now = SystemTime::now();
+            let duration = Duration::from_millis(cache_time_ms);
+            timeout_db.insert(key, now + duration);
+        } else {
+            let _ = timeout_db.remove(&key);
+        }
         return ("OK".to_string(), vec![0; 0]);
     } else {
         let error_code: u16 = 2;
@@ -285,7 +273,7 @@ async fn handle_touch(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: Shared
     }
 }
 
-async fn handle_ttl(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_ttl(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let ttl_key = std::str::from_utf8(&payload).expect("Payload error");
 
     if let Some(live_until) = timeout_db.get(ttl_key) {
@@ -311,16 +299,32 @@ async fn handle_ttl(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB
     }
 }
 
-async fn handle_list_keys(shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_has_key(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+    let key = std::str::from_utf8(&payload).expect("Payload error");
+
+    if shared_db.contains_key(key) {
+        return ("OK".to_string(), vec![1; 1]);
+    } else {
+        return ("OK".to_string(), vec![0; 1]);
+    }
+}
+
+fn handle_list_keys(payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let mut keys_payload_bytes: Vec<u8> = Vec::new();
+    let pattern = std::str::from_utf8(payload).unwrap();
 
     for entry in shared_db.iter() {
         let key_bytes = entry.key().as_bytes();
         let _query: Query = match serde_json::from_slice(key_bytes) {
             Ok(_q) => _q,
             Err(_e) => {
-                keys_payload_bytes.extend(key_bytes);
-                keys_payload_bytes.push(0);
+                if payload.len() == 0 {
+                    keys_payload_bytes.extend(key_bytes);
+                    keys_payload_bytes.push(0);
+                } else if glob_match(pattern, std::str::from_utf8(key_bytes).unwrap()) {
+                    keys_payload_bytes.extend(key_bytes);
+                    keys_payload_bytes.push(0);
+                }
                 continue;
             }
         };
@@ -329,7 +333,7 @@ async fn handle_list_keys(shared_db: SharedDB) -> (String, Vec<u8>) {
     return ("KY".to_string(), keys_payload_bytes);
 }
 
-async fn handle_delete_many(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
+fn handle_delete_many(timeout_db: TimeoutDB, payload: &Vec<u8>, shared_db: SharedDB) -> (String, Vec<u8>) {
     let del_keys_str = std::str::from_utf8(&payload).expect("Payload error");
     let del_keys: Vec<&str> = del_keys_str.split(0 as char).collect();
     let mut count: u16 = 0;
@@ -343,16 +347,22 @@ async fn handle_delete_many(timeout_db: TimeoutDB, payload: Vec<u8>, shared_db: 
     return ("DM".to_string(), count.to_be_bytes().to_vec());
 }
 
-async fn handle_wrong_protocol() -> (String, Vec<u8>) {
+fn handle_flush(timeout_db: TimeoutDB, shared_db: SharedDB) -> (String, Vec<u8>) {
+    timeout_db.clear();
+    shared_db.clear();
+    return ("FU".to_string(), vec![0; 0]);
+}
+
+fn handle_wrong_protocol() -> (String, Vec<u8>) {
     let error_code: u16 = 6;
     return ("ER".to_string(), error_code.to_be_bytes().to_vec());
 }
 
-async fn handle_connection_close() -> (String, Vec<u8>) {
+fn handle_connection_close() -> (String, Vec<u8>) {
     return ("CC".to_string(), vec![0; 0]);
 }
 
-async fn handle_unknown_type() -> (String, Vec<u8>) {
+fn handle_unknown_type() -> (String, Vec<u8>) {
     let error_code: u16 = 1;
     return ("ER".to_string(), error_code.to_be_bytes().to_vec());
 }

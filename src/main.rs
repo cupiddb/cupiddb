@@ -27,7 +27,13 @@ fn main() {
 }
 
 async fn start_server(config: AppConfig) {
-    let server = Server::new(config).await;
+    let server = match Server::new(config).await {
+        Ok(server) => server,
+        Err(e) => {
+            tracing::error!("Failed to create server: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     server.run().await;
 }
